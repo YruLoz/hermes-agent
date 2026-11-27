@@ -141,7 +141,8 @@ class EnvCred:
     """Credential-gated platform enable, applied as ``step(config)``.
 
     ``creds``: env names that must ALL be truthy (inner tuple = ANY of). ``token``: env stored as
-    ``PlatformConfig.token`` even when yaml disables the adapter (sending skills use it). ``fixed``:
+    ``PlatformConfig.token`` when no resolved token is already configured, even when yaml
+    disables the adapter (sending skills use it). ``fixed``:
     ``(extra_key, env[, default[, fn]])`` always written once enabled. ``optional*``: ``env_extras``
     specs. ``warn_missing``: ``(env, msg)`` logged BEFORE enabling when blank. ``then``: tail
     ``fn(config, platform_config)``. ``home``: ``env_home_channel`` env base applied only when the gate passed.
@@ -164,7 +165,11 @@ class EnvCred:
             logger.warning(self.warn_missing[1])
         platform_config = enable_from_env(config, self.platform)
         if self.token and (token := getenv(self.token)):
-            platform_config.token = token
+            from hermes_cli.config import _ENV_REF_RE
+
+            configured = platform_config.token
+            if not isinstance(configured, str) or not configured.strip() or _ENV_REF_RE.search(configured):
+                platform_config.token = token
         extra = platform_config.extra
         for key, env, *rest in self.fixed:
             default = rest[0] if rest else ""

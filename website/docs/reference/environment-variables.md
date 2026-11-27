@@ -308,6 +308,11 @@ These are set automatically by the Docker terminal backend when `proxy.enabled: 
 
 ## Messaging
 
+For Telegram, Discord, and Slack, a resolved token in `platforms.<name>.token`
+in `config.yaml` takes precedence over the platform's bot-token environment
+variable. An empty token or unresolved environment reference uses the variable
+when it is available.
+
 | Variable | Description |
 |----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token (from @BotFather) |

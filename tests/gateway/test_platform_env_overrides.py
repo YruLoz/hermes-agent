@@ -2,11 +2,62 @@
 ``PlatformEntry`` (``env_overrides`` / ``env_enable_credentials``, applied by
 ``gateway.config_env._apply_env_overrides``)."""
 
-from gateway.config import Platform
+import pytest
+
+from agent.secret_scope import reset_secret_scope, set_multiplex_active, set_secret_scope
+from gateway.config import Platform, load_gateway_config
 from gateway.platform_registry import platform_registry
+from hermes_constants import reset_hermes_home_override, set_hermes_home_override
 
 # Core-only platforms keep their env rows in gateway/config_env.py.
 _CORE_ONLY = {"local", "api_server", "webhook", "msgraph_webhook", "relay"}
+
+
+@pytest.mark.parametrize(("token_setting", "expected"), [
+    ("    token: profile-bot\n", "profile-bot"),
+    ("    token: ${TELEGRAM_PROFILE_TOKEN}\n", "expanded-profile-bot"),
+    ("    token: ${env:TELEGRAM_PROFILE_TOKEN}\n", "expanded-profile-bot"),
+    ("    token: ${MISSING_TELEGRAM_PROFILE_TOKEN}\n", "shared-bot"),
+    ("    token: '   '\n", "shared-bot"),
+    ("", "shared-bot"),
+])
+def test_plugin_platform_token_prefers_resolved_config(tmp_path, monkeypatch, token_setting, expected):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "shared-bot")
+    monkeypatch.setenv("TELEGRAM_PROFILE_TOKEN", "expanded-profile-bot")
+    monkeypatch.delenv("MISSING_TELEGRAM_PROFILE_TOKEN", raising=False)
+    (tmp_path / "config.yaml").write_text(
+        "platforms:\n  telegram:\n    enabled: true\n" + token_setting, encoding="utf-8"
+    )
+
+    assert load_gateway_config().platforms[Platform.TELEGRAM].token == expected
+
+
+def test_each_multiplex_profile_retains_its_token_with_shared_env(tmp_path):
+    homes = [tmp_path / name for name in ("primary", "secondary")]
+    for home in homes:
+        home.mkdir()
+        (home / "config.yaml").write_text(
+            "platforms:\n  telegram:\n    enabled: true\n    token: ${TELEGRAM_PROFILE_TOKEN}\n",
+            encoding="utf-8",
+        )
+
+    set_multiplex_active(True)
+    try:
+        for home in [*homes, homes[0]]:
+            expected = f"{home.name}-profile-bot"
+            home_reset = set_hermes_home_override(str(home))
+            secret_reset = set_secret_scope({
+                "TELEGRAM_BOT_TOKEN": "shared-bot",
+                "TELEGRAM_PROFILE_TOKEN": expected,
+            })
+            try:
+                assert load_gateway_config().platforms[Platform.TELEGRAM].token == expected
+            finally:
+                reset_secret_scope(secret_reset)
+                reset_hermes_home_override(home_reset)
+    finally:
+        set_multiplex_active(False)
 
 
 def _entries():
